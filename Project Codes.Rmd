@@ -1,0 +1,189 @@
+library(TSA)
+timedata=ts(read.csv("timeproject.csv",sep=",",header=T),start=c(1991,3),frequency = 4)
+head(timedata)
+unemployment=timedata[,-1]
+#1. Introduction covering data descripition, aim and the source of data.
+#2. Time series plot and interpretation (Visually determine the existence of a trend, seasonality, outliers).
+plot(unemployment,main="Plot of unemployment rate for Russion Federation",type="l")
+plot(unemployment,main="Plot of unemployment rate for Russion Federation",type="o")
+#3. Keep several observations out of the analysis to use them to measure the forecast accuracy of the models. (For yearly data and quarterly data 4 or 5.
+d_train=ts(unemployment[c(1:108)],start=c(1991,3),frequency = 4)
+d_test=ts(unemployment[c(109:113)],start=c(2018,3),frequency = 4)
+#4. Box-Cox transformation analysis: If the series need any transformation, do it. If the information criterion values are too close to each other, don't transform the data.
+library(forecast)
+lambda=BoxCox.lambda(d_train)
+library(TSA)
+BoxCox.ar(d_train, method="ols",lambda = seq(-2, 2, 0.01), plotit = TRUE)
+transformed_data=log(d_train)
+plot(transformed_data,main="Plot of Transformed Data")
+lambda=BoxCox.lambda(transformed_data)
+#5. Make a anomaly detection and if necessary clean the series from anomalies (use anomalize, forecast (tsclean function) or AnomalyDetection packages).
+library(anomalize)
+library(devtools)
+library(dplyr)
+library(tibble)
+timedata_anomalize=read.csv("timeproject.csv",sep=",",header=T)
+head(timedata_anomalize)
+unemployment_anomalize=read.table("unemployment.txt",header=F)
+head(unemployment_anomalize)
+rownames(unemployment_anomalize)=timedata_anomalize[,1]
+colnames(unemployment_anomalize)="Count"
+head(unemployment_anomalize)
+unemployment_anomalize_ts <- unemployment_anomalize %>% rownames_to_column() %>% as.tibble() %>%
+mutate(date = as.Date(rowname)) %>% select(-one_of('rowname'))
+unemployment_anomalize_ts %>%
+time_decompose(Count, method = "stl", frequency = "auto", trend = "auto") %>%
+anomalize(remainder, method = "gesd", alpha = 0.05, max_anoms = 0.2) %>%
+plot_anomaly_decomposition()
+#6. ACF, PACF plots, KPSS and ADF or PP test results  for zero mean, mean and trend cases and their interpretation. For seasonal unit root, HEGY and OCSB or Canova-Hansen tests are required.
+ts_cleaned=tsclean(transformed_data)
+acf(ts_cleaned,main="ACF Plot of Unemployment")
+pacf(ts_cleaned,main="ACF Plot of Unemployment")
+plot(ts_cleaned)
+library(tseries)
+kpss.test(ts_cleaned,"Level")
+library(fUnitRoots) 
+adfTest(ts_cleaned, lags=1, type="c") 
+pp.test(ts_cleaned)
+library(pdR)
+t=HEGY.test(ts_cleaned,itsd=c(1,1,c(1:3)))
+t$stats
+library(uroot)
+#7) If there is a trend, remove it either by detrending or differencing. You may need to apply unit root tests again.
+library(forecast)
+ndiffs(ts_cleaned)
+library(forecast)
+dts_cleaned=diff(ts_cleaned)
+acf(dts_cleaned)
+pacf(dts_cleaned)
+plot(dts_cleaned)
+kpss.test(dts_cleaned,"Level")  
+kpss.test(dts_cleaned,"Trend") 
+library(uroot)
+control=HEGY.test(dts_cleaned,itsd=c(1,0,0))
+control$stats
+ddts_cleaned=diff(dts_cleaned) 
+control1=HEGY.test(ddts_cleaned,itsd=c(1,1,c(1:3)))
+control1$stats
+kpss.test(ddts_cleaned)
+#8. Then, look at the time series plot of a stationary series, ACF and PACF plots, information table, ESACF.
+plot(ddts_cleaned,main="Plot of observations after two differencing")
+acf(as.vector(ddts_cleaned),main="ACF",lag.max = 50)
+pacf(as.vector(ddts_cleaned),main=" PACF ") 
+eacf(ddts_cleaned) 
+library(caschrono)
+fit1=arima(ts_cleaned, order=c(2,2,2)) 
+fit2=auto.arima(ts_cleaned,d=2)
+armaselect(ts_cleaned)
+fit3=Arima(ts_cleaned,order=c(1,1,1))
+summary(fit1)
+summary(fit2)
+#10) After deciding the order of the possible model (s), run MLE or conditional or uncondinitional LSE and estimate the parameters. Compare the information criteria of several models. (Note: If there is a convergence problem, you can change your estimation method).
+#MLE
+fit=Arima(ts_cleaned,order=c(1,2,2), seasonal=list(order=c(1,0,0),period=4),method="ML")
+summary(fit)
+fitted=fit$fitted
+#ARIMA(1,2,2)(1,0,0)[4]
+##11) Diagnostic Checking: 
+#a) On the residuals, perform portmanteau lack of fit test, look at the ACF-PACF plots of the resuduals (for all time points, ACF and PACF values should be in the white noise bands), look at the standardized residuals vs time plot to see any outliers or pattern. 
+resids=resid(fit)
+summary(resids)
+boxplot(resids)
+qqnorm(resids)
+qqline(resids)
+acf(resids,main="ACF")
+pacf(resids,main="PACF")
+#To detect autocorrelation
+Box.test(resids,lag=15,type = c("Ljung-Box")) 
+Box.test(resids,lag=15,type = c("Box-Pierce")) #partmanteau test
+library(lmtest) # Breusch-Godfrey test 
+m = lm(resids ~ 1+zlag(resids))
+bgtest(m,order=15)
+stand_data=ts(rstandard(fit),start=c(1991,3))
+plot(stand_data, xlab="Years", ylab="Standardized Residuals", col="salmon", main="Plot of
+Standardized Residuals versus Time")
+#b) Normality check
+hist(resids, xlab='Residuals',main="Histogram of Residuals", col="salmon")
+qqnorm(resids, main="Normal Q-Q Plot of Residuals")
+qqline(resids, main="Normal Q-Q Plot of Residuals")
+shapiro.test(resids)
+resids=BoxCox(resids,lambda = "auto")
+shapiro.test(resids)
+#to check heteroscedasticity
+sq_resids=resids^2
+par(mfrow=c(1,2))
+acf(as.vector(sq_resids),lag.max=50,  main="ACF of Squared Residuals");
+pacf(as.vector(sq_resids),lag.max=50,main="PACF of Squared Residuals") 
+library(FinTS)
+library(MTS)
+library(FitAR)
+archTest(resids) 
+#12) FORECASTING
+#a)MSE
+fitmme=Arima(ts_cleaned, order=c(1,2,2), seasonal = list(order=c(1,0,0), period=4))
+ff=forecast(fitmme,h=5)
+ff$mean
+fitpred=predict(fitmme,n.ahead=5, start=c(2018,2))
+fitpred
+plot(ff)
+#b) ets code to choose the best exponential smoothing 
+ets_fit=ets(ts_cleaned,model="ZZZ")
+summary(ets_fit) 
+ets_forecasts= forecast(ets_fit,h=5)
+plot(ets_forecasts)
+#c) nnetar
+library(tsdl)
+library(forecast)
+model=nnetar(ts_cleaned)
+model
+nnetar_forecast=forecast(model,h=5,PI=T)  
+plot(nnetar_forecast)
+#13) BACK TRANSFORMATION
+mme_backtransform=InvBoxCox(fitpred$mean,lambda=lambda) 
+ets_backtransform=InvBoxCox(ets_forecasts$mean,lambda=lambda)
+nnetar_backtransform=InvBoxCox(nnetar_forecast$mean,lambda=lambda)
+#14)Calculate the forecast accuracy measures and state which model gives the highest performance for your dataset.
+accuracy(ff,d_test) #from mme
+accuracy(ets_forecasts,d_test) #from ets
+accuracy(nnetar_forecast,d_test) #from nnetar
+plot(d_train,xlim=c(1991,2020))
+abline(v=2018)
+lines(as.numeric(nnetar_backtransform),col="red")
+#15)Provide plots of the original time series, predictions, forecasts and prediction intervals on the same plot drawing the forecast origin for ARIMA models, exponential smoothing method and neural networks.
+library(astsa)
+#ARIMA
+sarima.for(d_train,n.ahead = 5,1,2,2,1,0,0,4)
+abline(v=2018)
+lines(mme_backtransform,col="deeppink2")
+lines(mme_backtransform-(2*(sqrt(var(mme_backtransform)))),col="deeppink2",lty=3)
+lines(mme_backtransform+(2*(sqrt(var(mme_backtransform)))),col="deeppink2",lty=3)
+legend("topleft", legend=c("ARIMA"), col=c("deeppink2"), lty=1:2, cex=0.8)
+#ETS
+sarima.for(d_train,n.ahead = 5,1,2,2,1,0,0,4)
+abline(v=2018)
+lines(ets_backtransform,col="blue")
+lines(ets_backtransform-(2*(sqrt(var(ets_backtransform)))),col="blue",lty=3)
+lines(ets_backtransform+(2*(sqrt(var(ets_backtransform)))),col="blue",lty=3)
+legend("topleft", legend=c("ETS"),
+       col=c("blue"), lty=1:2, cex=0.8)
+#NNETAR
+sarima.for(d_train,n.ahead = 5,1,2,2,1,0,0,4)
+abline(v=2018)
+lines(nnetar_backtransform,col="darkturquoise")
+lines(nnetar_backtransform-(2*(sqrt(var(nnetar_backtransform)))),col="darkturquoise",lty=3)
+lines(nnetar_backtransform+(2*(sqrt(var(nnetar_backtransform)))),col="darkturquoise",lty=3)
+legend("topleft", legend=c("NNETAR"),
+       col=c("darkturquoise"), lty=1:2, cex=0.8)
+sarima.for(d_train,n.ahead = 5,1,2,2,1,0,0,4)
+abline(v=2018)
+lines(mme_backtransform,col="deeppink2")
+lines(mme_backtransform-(2*(sqrt(var(mme_backtransform)))),col="deeppink2",lty=3)
+lines(mme_backtransform+(2*(sqrt(var(mme_backtransform)))),col="deeppink2",lty=3)
+lines(ets_backtransform,col="blue")
+lines(ets_backtransform-(2*(sqrt(var(ets_backtransform)))),col="blue",lty=3)
+lines(ets_backtransform+(2*(sqrt(var(ets_backtransform)))),col="blue",lty=3)
+lines(nnetar_backtransform,col="darkturquoise")
+lines(nnetar_backtransform-(2*(sqrt(var(nnetar_backtransform)))),col="darkturquoise",lty=3)
+lines(nnetar_backtransform+(2*(sqrt(var(nnetar_backtransform)))),col="darkturquoise",lty=3)
+legend("topleft", legend=c("ARIMA", "ETS", "NNETAR"),
+       col=c("deeppink2","blue","darkturquoise"), lty=1:2, cex=0.8)
